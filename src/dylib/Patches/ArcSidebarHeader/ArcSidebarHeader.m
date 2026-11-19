@@ -1,4 +1,6 @@
-#import "ArcSidebarHeader.h"
+#import "Look.h"
+
+NSView *DPArcHostOf(NSWindow *window, BOOL create);
 
 static NSHashTable<NSWindow *> *DPPending;
 
@@ -31,6 +33,11 @@ static void DPInstallArcSidebarHeader(void) {
     DPHook(DPDiaContentPane, @selector(layout), (IMP)DPPane_layout);
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:nil
                                                 usingBlock:^(NSNotification *note) { DPSchedule(note.object); }];
+    // Keeps the site name, the arrows' enabled look and editing in step with Dia, after each event.
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidUpdateNotification object:nil queue:nil usingBlock:^(NSNotification *note) {
+        NSView *host = DPArcSidebarHeader.on ? DPArcHostOf(note.object, NO) : nil;
+        if (host.superview) DPArcRestyle(DPArcStateOf(host));
+    }];
     DPArcInstallSnapshot();
 }
 

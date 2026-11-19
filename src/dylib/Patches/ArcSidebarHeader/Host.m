@@ -14,13 +14,21 @@
 
 // Arc's address capsule: a soft fill a little lighter than the sidebar.
 @interface DPArcCapsuleView : NSView
+@property (nonatomic) BOOL hovered;
 @end
 @implementation DPArcCapsuleView
 - (BOOL)isFlipped { return YES; }
 - (BOOL)wantsUpdateLayer { return YES; }
+- (void)setHovered:(BOOL)hovered {
+    if (_hovered == hovered) return;
+    _hovered = hovered;
+    self.needsDisplay = YES;
+}
+// Arc's capsule is a little lighter than the sidebar, and a little lighter again under the pointer.
 - (void)updateLayer {
     BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
-    self.layer.backgroundColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.09 : 0.06].CGColor;
+    CGFloat alpha = dark ? (self.hovered ? 0.14 : 0.10) : (self.hovered ? 0.09 : 0.06);
+    self.layer.backgroundColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:alpha].CGColor;
     self.layer.cornerRadius = 10;
     self.layer.cornerCurve = kCACornerCurveContinuous;
 }
@@ -42,6 +50,12 @@ NSView *DPArcMakeHost(void) {
     capsule.wantsLayer = YES;
     capsule.identifier = @"DPArcCapsule";
     [host addSubview:capsule];
+    // Extensions sit in this at their full width, so Dia never sees them squeezed and rebuilds them.
+    NSView *clip = [[DPArcHostView alloc] initWithFrame:NSZeroRect];
+    clip.identifier = @"DPArcClip";
+    clip.wantsLayer = YES;
+    clip.layer.masksToBounds = YES;
+    [capsule addSubview:clip];
     return host;
 }
 
