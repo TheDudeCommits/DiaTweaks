@@ -1,20 +1,24 @@
 #import "Look.h"
 
 NSView *DPArcHostOf(NSWindow *window, BOOL create);
+void DPArcInstallSpacing(void), DPArcApplySpacing(void), DPArcInstallSpaceLabel(void), DPArcApplySpaceLabel(void);
 
 static NSHashTable<NSWindow *> *DPPending;
+extern NSHashTable<NSView *> *DPArcPanes;
 
-// Moving views inside Dia's layout pass makes it lay out again; do it once, right after.
+// Moving views inside Dia's layout pass makes it lay out again; do it once, right after, but before the frame is drawn,
+// so a new tab's controls arrive in the sidebar in the same frame as the tab.
 static void DPSchedule(NSWindow *window) {
-    if (!window || [DPPending containsObject:window]) return;
+    if (!window || !DPArcSidebarHeader.on || [DPPending containsObject:window]) return;
     [DPPending addObject:window];
     __weak NSWindow *weak = window;
-    dispatch_async(dispatch_get_main_queue(), ^{
+    CFRunLoopPerformBlock(CFRunLoopGetMain(), kCFRunLoopCommonModes, ^{
         NSWindow *strong = weak;
         if (!strong) return;
         [DPPending removeObject:strong];
         DPArcSyncWindow(strong);
     });
+    CFRunLoopWakeUp(CFRunLoopGetMain());
 }
 
 static void DPHeader_layout(NSView *self, SEL _cmd) {
@@ -24,11 +28,13 @@ static void DPHeader_layout(NSView *self, SEL _cmd) {
 
 static void DPPane_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPPane_layout, self);
+    [DPArcPanes addObject:self];
     DPSchedule(self.window);
 }
 
 static void DPInstallArcSidebarHeader(void) {
     DPPending = [NSHashTable weakObjectsHashTable];
+    DPArcPanes = [NSHashTable weakObjectsHashTable];
     DPHook(DPDiaSidebarHeader, @selector(layout), (IMP)DPHeader_layout);
     DPHook(DPDiaContentPane, @selector(layout), (IMP)DPPane_layout);
     [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeKeyNotification object:nil queue:nil
@@ -39,9 +45,15 @@ static void DPInstallArcSidebarHeader(void) {
         if (host.superview) DPArcRestyle(DPArcStateOf(host));
     }];
     DPArcInstallSnapshot();
+    DPArcInstallSpacing();
+    DPArcInstallSpaceLabel();
 }
 
-static void DPApplyArcSidebarHeader(DPPatch *patch) { DPArcSyncAll(); }
+static void DPApplyArcSidebarHeader(DPPatch *patch) {
+    DPArcSyncAll();
+    DPArcApplySpacing();
+    DPArcApplySpaceLabel();
+}
 
 static NSString *DPVerifyArcSidebarHeader(DPPatch *patch) {
     DPPatch *hide = DPPatchNamed(@"hideToolbar");

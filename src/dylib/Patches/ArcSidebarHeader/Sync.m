@@ -7,27 +7,58 @@ NSDictionary<NSString *, NSView *> *DPArcParts(NSView *pane);
 NSView *DPArcHostOf(NSWindow *window, BOOL create);
 NSView *DPArcCapsuleIn(NSView *host);
 void DPArcMoveIn(NSView *view, NSView *into);
-void DPArcMovePaneHome(NSView *pane);
-static char DPPaneKey, DPHidKey;
+void DPArcMovePartsHome(NSDictionary<NSString *, NSView *> *parts);
+NSHashTable<NSView *> *DPArcPanes;  // Every tab's content pane Dia has laid out; filled by the pane layout hook.
+static char DPHidKey, DPHeaderKey, DPFooterKey;
 static BOOL DPSyncing;
-
-static NSArray<NSView *> *DPPanesIn(NSWindow *window) {
-    NSMutableArray *panes = [NSMutableArray new];
-    DPFindView(window.contentView, ^BOOL(NSView *v) {
-        if (DPIsKind(v, DPDiaContentPane) && DPSubview(v, DPDiaToolbar)) [panes addObject:v];
-        return NO;
-    });
-    return panes;
+void DPArcApplySpacing(void);
+// Developer tools only: what the sync decided, to find out why the header leaves the sidebar.
+void DPArcLog(NSString *format, ...) {
+    static NSFileHandle *log;
+    static BOOL checked;
+    if (!checked) {
+        checked = YES;
+        if ([[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] boolForKey:@"devTools"]) {
+            NSString *path = DPAppSupport(@"DiaPatches/arc-log.txt");
+            [NSFileManager.defaultManager createFileAtPath:path contents:nil attributes:nil];
+            log = [NSFileHandle fileHandleForWritingAtPath:path];
+        }
+    }
+    if (!log) return;
+    va_list args;
+    va_start(args, format);
+    NSString *line = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    [log writeData:[[NSString stringWithFormat:@"%.3f %@\n", CACurrentMediaTime(), line] dataUsingEncoding:NSUTF8StringEncoding]];
 }
 
-// In split view, the pane you're typing or clicking in lends its controls; otherwise the one that already has.
-static NSView *DPChosenPane(NSWindow *window, NSArray<NSView *> *panes) {
+// Each tab has its own pane and toolbar; the one on screen lends the sidebar its controls. In split view, the side
+// you're typing or clicking in; otherwise the one that already has them, or the widest.
+static NSView *DPVisiblePane(NSWindow *window, NSView *current) {
     NSResponder *responder = window.firstResponder;
     if ([responder isKindOfClass:NSTextView.class] && ((NSTextView *)responder).isFieldEditor) responder = (NSResponder *)((NSTextView *)responder).delegate;
-    for (NSView *pane in panes) if ([responder isKindOfClass:NSView.class] && [(NSView *)responder isDescendantOf:pane]) return pane;
-    NSView *current = DPGet(window, &DPPaneKey);
-    return [panes containsObject:current] ? current : panes.firstObject;
+    NSView *focused = nil, *widest = nil;
+    BOOL currentShows = NO;
+    for (NSView *pane in DPArcPanes) {
+        if (pane.window != window || pane.hiddenOrHasHiddenAncestor || NSIsEmptyRect(pane.visibleRect) || !DPSubview(pane, DPDiaToolbar)) continue;
+        if ([responder isKindOfClass:NSView.class] && [(NSView *)responder isDescendantOf:pane]) focused = pane;
+        if (pane == current) currentShows = YES;
+        if (!widest || NSWidth(pane.frame) > NSWidth(widest.frame)) widest = pane;
+    }
+    return focused ?: currentShows ? current : widest;
 }
+
+// Looked up once per window and kept while it's still there: a search of the whole window on every layout is what stutters.
+static NSView *DPCached(NSWindow *window, const void *key, const char *cls) {
+    NSView *found = [DPGet(window, key) pointerValue];
+    if (found && found.window == window) return found;
+    found = DPFindView(window.contentView, ^BOOL(NSView *v) { return DPIsKind(v, cls); });
+    DPSet(window, key, found ? [NSValue valueWithNonretainedObject:found] : nil);
+    return found;
+}
+
+// Only the sidebar layout has a footer, even with the sidebar hidden.
+static BOOL DPSidebarLayout(NSWindow *window) { return DPCached(window, &DPFooterKey, DPDiaSidebarFooter) != nil; }
 
 static NSView *DPProfileWrapper(NSView *header) {
     return DPFindView(header, ^BOOL(NSView *v) { return [NSStringFromClass(v.class) containsString:@"ProfileIndicatorWrapperView"]; });
@@ -82,39 +113,72 @@ static void DPLayOut(DPArcState *state) {
 void DPArcSyncWindow(NSWindow *window) {
     if (DPSyncing || !window) return;
     DPSyncing = YES;
-    NSView *header = DPFindView(window.contentView, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaSidebarHeader); });
-    NSArray<NSView *> *panes = DPPanesIn(window);
-    NSView *pane = DPChosenPane(window, panes), *root = header.superview;
+    NSView *existing = DPArcHostOf(window, NO);
+    DPArcState *old = existing ? DPArcStateOf(existing) : nil;
+    NSView *header = DPCached(window, &DPHeaderKey, DPDiaSidebarHeader), *root = header.superview;
+    BOOL active = DPArcSidebarHeader.on && DPHideToolbar.on && root && DPSidebarLayout(window);
+    NSView *pane = active ? DPVisiblePane(window, old.pane) : nil;
     NSDictionary *parts = pane ? DPArcParts(pane) : nil;
-    BOOL want = DPArcSidebarHeader.on && DPHideToolbar.on && header && root && parts && !DPTabsAtTop(window);
-    NSView *host = DPArcHostOf(window, want), *profile = header ? DPProfileWrapper(header) : nil;
-    for (NSView *other in panes) {
-        if (want && other == pane) continue;
-        // Split view moved the controls to another pane: give these back looking as Dia drew them.
-        if (host && DPArcStateOf(host).parts[@"address"] == DPArcParts(other)[@"address"]) DPArcUnstyle(DPArcStateOf(host));
-        DPArcMovePaneHome(other);
-    }
-    if (want) {
-        DPSet(window, &DPPaneKey, pane);
-        if (root) DPArcWatchSidebar(root);
-        for (NSString *role in @[ @"toggle", @"back", @"forward", @"reload" ]) DPArcMoveIn(parts[role], host);
-        DPArcMoveIn(parts[@"address"], DPArcCapsuleIn(host));
-        if (parts[@"extensions"]) DPArcMoveIn(parts[@"extensions"], DPArcClipIn(DPArcCapsuleIn(host)));
+    // A pane with no address field yet (a tab still opening) keeps the controls already in the sidebar, rather than emptying it.
+    BOOL switching = parts && pane != old.pane;
+    static void *lastPane;
+    if (pane != lastPane || switching) DPArcLog(@"%@ active=%d pane=%p old=%p parts=%lu switching=%d", window.title, active, pane, old.pane, (unsigned long)parts.count, switching);
+    lastPane = (__bridge void *)pane;
+    NSView *profile = header ? DPProfileWrapper(header) : nil;
+    if (active && (parts || old.parts)) {
+        NSView *host = DPArcHostOf(window, YES);
         DPArcState *state = DPArcStateOf(host);
+        BOOL fresh = host.superview == nil;
+        if (switching && state.parts) {
+            DPArcUnstyle(state);
+            DPArcMovePartsHome(state.parts);
+        }
+        if (switching || !state.parts) {
+            state.pane = pane;
+            state.parts = parts;
+        }
         state.window = window;
         state.host = host;
         state.header = header;
-        state.parts = parts;
+        DPArcWatchSidebar(root);
+        NSDictionary *mine = state.parts;
+        for (NSString *role in @[ @"toggle", @"back", @"forward", @"reload" ]) if (mine[role]) DPArcMoveIn(mine[role], host);
+        DPArcMoveIn(mine[@"address"], DPArcCapsuleIn(host));
+        if (mine[@"extensions"]) DPArcMoveIn(mine[@"extensions"], DPArcClipIn(DPArcCapsuleIn(host)));
         DPLayOut(state);
         // The profile switcher would sit under the back and forward buttons; ⌘1–9 and the Profiles menu still switch.
         if (profile && !profile.hidden) { profile.hidden = YES; DPSet(profile, &DPHidKey, @YES); }
-    } else {
-        if (host) DPArcUnstyle(DPArcStateOf(host));
-        [host removeFromSuperview];
+        DPArcSetShift(root, YES);
+        if (fresh) DPArcApplySpacing();  // The tab list laid out before the sidebar was ours: lay it out again with Arc's spacing.
+    } else if (!active) {
+        if (old) {
+            DPArcUnstyle(old);
+            DPArcMovePartsHome(old.parts);
+            old.parts = nil;
+            old.pane = nil;
+        }
+        [existing removeFromSuperview];
         if (profile && DPGet(profile, &DPHidKey)) { profile.hidden = NO; DPSet(profile, &DPHidKey, nil); }
+        if (root) DPArcSetShift(root, NO);
+        if (existing.window == nil && old) DPArcApplySpacing();
     }
-    if (root) DPArcSetShift(root, want);
     DPSyncing = NO;
+}
+
+void DPArcLogState(NSString *when) {
+    for (NSWindow *window in NSApp.windows) {
+        NSView *host = DPArcHostOf(window, NO);
+        if (!host || !window.visible) continue;
+        DPArcState *state = DPArcStateOf(host);
+        NSMutableString *parts = [NSMutableString new];
+        for (NSString *role in state.parts) {
+            NSView *v = state.parts[role];
+            [parts appendFormat:@" %@:%@%@", role, [v isDescendantOf:host] ? @"in" : @"OUT", v.hiddenOrHasHiddenAncestor ? @"(hidden)" : @""];
+        }
+        NSView *root = state.header.superview;
+        DPArcLog(@"[%@] fullscreen=%d %@ host:%@ root:%@ x=%g alpha=%g%@ label='%@'", when, (window.styleMask & NSWindowStyleMaskFullScreen) != 0, window.title, host.superview == root ? @"in" : @"OUT", root.hidden ? @"hidden" : @"shown",
+                 NSMinX(root.frame), host.alphaValue, parts, state.label.stringValue);
+    }
 }
 
 void DPArcSyncAll(void) {

@@ -18,8 +18,36 @@ static void DPWriteSnapshots(void) {
     }
 }
 
+void DPArcLogState(NSString *when);
+
+static NSMenuItem *DPFindItem(NSMenu *menu, NSString *title) {
+    for (NSMenuItem *item in menu.itemArray) {
+        if ([item.title isEqualToString:title]) return item;
+        NSMenuItem *found = item.submenu ? DPFindItem(item.submenu, title) : nil;
+        if (found) return found;
+    }
+    return nil;
+}
+
+// Developer tools only: `com.diapatches.dev.arcMenu` with a menu item's title runs it, then logs where the header's parts are.
+static void DPRunMenuItem(NSString *title) {
+    if ([title isEqual:@"?"]) {
+        NSMutableArray *titles = [NSMutableArray new];
+        for (NSMenuItem *top in NSApp.mainMenu.itemArray)
+            for (NSMenuItem *item in top.submenu.itemArray) if (item.title.length) [titles addObject:[NSString stringWithFormat:@"%@>%@", top.title, item.title]];
+        return DPArcLogState([titles componentsJoinedByString:@" | "]);
+    }
+    NSMenuItem *item = DPFindItem(NSApp.mainMenu, title);
+    if (!item) return DPArcLogState([@"no menu item " stringByAppendingString:title]);
+    [item.menu update];
+    [item.menu performActionForItemAtIndex:[item.menu indexOfItem:item]];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ DPArcLogState(title); });
+}
+
 void DPArcInstallSnapshot(void) {
     if (![[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] boolForKey:@"devTools"]) return;
     [NSDistributedNotificationCenter.defaultCenter addObserverForName:@"com.diapatches.dev.sidebarSnapshot" object:nil queue:NSOperationQueue.mainQueue
                                                            usingBlock:^(NSNotification *_) { DPWriteSnapshots(); }];
+    [NSDistributedNotificationCenter.defaultCenter addObserverForName:@"com.diapatches.dev.arcMenu" object:nil queue:NSOperationQueue.mainQueue
+                                                           usingBlock:^(NSNotification *note) { DPRunMenuItem(note.object); }];
 }

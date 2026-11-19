@@ -3,7 +3,7 @@
 extern DPPatch DPArcSidebarHeader;
 
 // The capsule row's height, added between the sidebar header and the tabs.
-static const CGFloat DPArcRowHeight = 32;
+static const CGFloat DPArcRowHeight = 39;
 
 // Set while we place a moved view, so its setFrame: goes through; Dia's own calls are only recorded.
 extern BOOL DPArcPlacing;

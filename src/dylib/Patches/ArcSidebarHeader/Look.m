@@ -35,9 +35,10 @@ static NSTextView *DPAddressText(NSView *address) {
     return (NSTextView *)DPFindView(address, ^BOOL(NSView *v) { return [v isKindOfClass:NSTextView.class]; });
 }
 
-// Arc shows only the site: crunchyroll.com, not https://www.crunchyroll.com/series/….
+// Arc shows only the site: crunchyroll.com, not https://www.crunchyroll.com/series/…. Empty for a blank page, so Dia's own prompt shows.
 static NSString *DPSiteOf(NSString *text) {
     NSString *trimmed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    if ([trimmed hasPrefix:@"about:"] || [trimmed hasPrefix:@"dia:"] || [trimmed hasPrefix:@"chrome:"]) return @"";
     if (!trimmed.length || [trimmed containsString:@" "]) return trimmed;
     NSURL *url = [NSURL URLWithString:[trimmed containsString:@"://"] ? trimmed : [@"https://" stringByAppendingString:trimmed]];
     NSString *host = url.host;
@@ -87,9 +88,24 @@ void DPArcRestyle(DPArcState *state) {
     NSView *inner = address.subviews.firstObject;
     if (inner.layer.backgroundColor && CGColorGetAlpha(inner.layer.backgroundColor) > 0) inner.layer.backgroundColor = NSColor.clearColor.CGColor;
 
-    BOOL editing = DPEditing(state), open = editing || state.overCapsule;
-    NSTextView *text = DPAddressText(address);
+    if (!state.text || ![state.text isDescendantOf:address]) {
+        state.text = DPAddressText(address);
+        NSView *scroller = state.text.enclosingScrollView ?: state.text;
+        NSMutableArray *buttons = [NSMutableArray new];
+        DPFindView(address, ^BOOL(NSView *v) {
+            if (DPIsKind(v, DPDiaHoverableControl) && ![v isDescendantOf:scroller]) [buttons addObject:v];
+            return NO;
+        });
+        state.fieldButtons = buttons;
+        state.shown = nil;
+    }
+    NSTextView *text = state.text;
     NSView *scroller = text.enclosingScrollView ?: text;
+    NSString *site = DPSiteOf(text.string ?: @"");
+    BOOL editing = DPEditing(state), open = editing || state.overCapsule, plain = editing || !site.length;
+    NSString *shown = [NSString stringWithFormat:@"%d%d%d|%@|%@|%@", editing, open, plain, site, NSStringFromRect(capsule.bounds), NSStringFromRect(scroller.frame)];
+    if ([state.shown isEqual:shown] && state.label.superview == capsule) return;
+    state.shown = shown;
     if (!state.label) {
         state.label = [NSTextField labelWithString:@""];
         state.label.font = [NSFont systemFontOfSize:13];
@@ -98,19 +114,16 @@ void DPArcRestyle(DPArcState *state) {
         state.label.identifier = @"DPArcSite";
     }
     if (state.label.superview != capsule) [capsule addSubview:state.label positioned:NSWindowBelow relativeTo:nil];
-    NSString *site = DPSiteOf(text.string ?: @"");
     if (![state.label.stringValue isEqual:site]) state.label.stringValue = site;
     // At rest Arc shows the site alone; the bookmark, split and site buttons come in under the pointer.
     NSRect area = open && scroller ? [scroller convertRect:scroller.bounds toView:capsule] : [address convertRect:address.bounds toView:capsule];
-    DPFindView(address, ^BOOL(NSView *v) {
-        if (DPIsKind(v, DPDiaHoverableControl) && ![v isDescendantOf:scroller]) DPFade(v, open ? 1 : 0);
-        return NO;
-    });
+    for (NSView *button in state.fieldButtons) DPFade(button, open ? 1 : 0);
     CGFloat height = ceil(state.label.intrinsicContentSize.height);
     NSRect frame = NSMakeRect(DPArcTextInset, round((NSHeight(capsule.bounds) - height) / 2), MAX(0, (open ? NSMaxX(area) : NSWidth(capsule.bounds) - DPArcTextInset) - DPArcTextInset), height);
     if (!NSEqualRects(state.label.frame, frame)) state.label.frame = frame;
-    if (scroller.alphaValue != (editing ? 1 : 0)) scroller.alphaValue = editing ? 1 : 0;
-    if (state.label.hidden != editing) state.label.hidden = editing;
+    // Typing, or a blank page, shows Dia's own field: its text, caret and prompt.
+    if (scroller.alphaValue != (plain ? 1 : 0)) scroller.alphaValue = plain ? 1 : 0;
+    if (state.label.hidden != plain) state.label.hidden = plain;
     DPFade(DPArcClipIn(capsule), open ? 1 : 0);
     if ([capsule respondsToSelector:@selector(setHovered:)]) [capsule setValue:@(state.overCapsule && !editing) forKey:@"hovered"];
 }
@@ -120,10 +133,10 @@ void DPArcUnstyle(DPArcState *state) {
     DPUnstyleArrow(state.parts[@"forward"]);
     NSTextView *text = DPAddressText(state.parts[@"address"]);
     (text.enclosingScrollView ?: text).alphaValue = 1;
-    DPFindView(state.parts[@"address"], ^BOOL(NSView *v) {
-        if (DPIsKind(v, DPDiaHoverableControl)) v.alphaValue = 1;
-        return NO;
-    });
+    for (NSView *button in state.fieldButtons) button.alphaValue = 1;
+    state.text = nil;
+    state.fieldButtons = nil;
+    state.shown = nil;
     DPArcClipIn(state.parts[@"address"].superview).alphaValue = 1;
     [state.label removeFromSuperview];
     [state.lightsTimer invalidate];

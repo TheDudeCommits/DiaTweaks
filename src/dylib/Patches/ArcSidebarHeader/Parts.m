@@ -32,22 +32,18 @@ static NSView *DPIconControl(NSView *bar, NSString *icon, NSString *label, NSUIn
 NSDictionary<NSString *, NSView *> *DPArcParts(NSView *pane) {
     NSMutableDictionary *parts = DPGet(pane, &DPPartsKey);
     NSView *bar = DPSubview(pane, DPDiaToolbar);
-    if (parts) {
-        // Pinning a first extension makes its view later: pick it up then.
-        if (!parts[@"extensions"] && bar) parts[@"extensions"] = DPFindView(bar, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaPinnedExtensions); });
-        return parts;
-    }
-    if (!bar) return nil;
+    if (!bar) return parts;
+    // A new tab's toolbar fills in over a few layouts: take what's there, and pick up the rest as it arrives.
+    if (parts.count == DPArcRoles.count) return parts;
     Class hoverable = objc_getClass(DPDiaHoverableControl);
-    NSMutableDictionary *found = [NSMutableDictionary new];
-    found[@"toggle"] = DPFindView(bar, ^BOOL(NSView *v) { return DPHasLabel(v, @"Toggle sidebar") || (hoverable && v.class == hoverable); });
-    found[@"back"] = DPIconControl(bar, @"ChevronIconView", @"Go back", 0);
-    found[@"forward"] = DPIconControl(bar, @"ChevronIconView", @"Go forward", 1);
-    found[@"reload"] = DPIconControl(bar, @"ReloadIconView", @"Reload this page", 0);
-    found[@"address"] = DPFindView(bar, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaAddressField); });
-    found[@"extensions"] = DPFindView(bar, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaPinnedExtensions); });
-    // Without pinned extensions there is no extensions view: move the rest, and look again next time.
-    if (found.count < DPArcRoles.count - (found[@"extensions"] ? 0 : 1)) return nil;
+    NSMutableDictionary *found = parts ?: [NSMutableDictionary new];
+    if (!found[@"toggle"]) found[@"toggle"] = DPFindView(bar, ^BOOL(NSView *v) { return DPHasLabel(v, @"Toggle sidebar") || (hoverable && v.class == hoverable); });
+    if (!found[@"back"]) found[@"back"] = DPIconControl(bar, @"ChevronIconView", @"Go back", 0);
+    if (!found[@"forward"]) found[@"forward"] = DPIconControl(bar, @"ChevronIconView", @"Go forward", 1);
+    if (!found[@"reload"]) found[@"reload"] = DPIconControl(bar, @"ReloadIconView", @"Reload this page", 0);
+    if (!found[@"address"]) found[@"address"] = DPFindView(bar, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaAddressField); });
+    if (!found[@"extensions"]) found[@"extensions"] = DPFindView(bar, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaPinnedExtensions); });
+    if (!found[@"address"]) return nil;
     DPSet(pane, &DPPartsKey, found);
     return found;
 }
@@ -73,8 +69,10 @@ void DPArcMoveIn(NSView *view, NSView *into) {
 
 void DPArcMoveHome(NSView *view) {
     DPArcHome *home = DPGet(view, &DPHomeKey);
-    if (!DPArcIsMoved(view) || !home.superview) return;
+    if (!DPArcIsMoved(view)) return;
     DPArcMarkMoved(view, NO);
+    // Its tab closed and took the toolbar with it: there's nowhere to go back to.
+    if (!home.superview) return [view removeFromSuperview];
     NSArray *siblings = home.superview.subviews;
     if (home.index < siblings.count) [home.superview addSubview:view positioned:NSWindowBelow relativeTo:siblings[home.index]];
     else [home.superview addSubview:view];
@@ -82,8 +80,7 @@ void DPArcMoveHome(NSView *view) {
     home.superview.needsLayout = YES;
 }
 
-void DPArcMovePaneHome(NSView *pane) {
-    NSDictionary *parts = DPGet(pane, &DPPartsKey);
+void DPArcMovePartsHome(NSDictionary<NSString *, NSView *> *parts) {
     for (NSString *role in DPArcRoles) if (parts[role]) DPArcMoveHome(parts[role]);
 }
 

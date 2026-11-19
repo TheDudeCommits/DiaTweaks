@@ -12,7 +12,11 @@ static const CGFloat DPArcTextInset = 12;
 @interface DPArcState : NSObject
 @property (nonatomic, weak) NSWindow *window;
 @property (nonatomic, weak) NSView *host, *header;
+@property (nonatomic, weak) NSView *pane;  // The tab's pane whose controls are in the sidebar.
 @property (nonatomic, strong) NSDictionary<NSString *, NSView *> *parts;
+@property (nonatomic, weak) NSTextView *text;
+@property (nonatomic, strong) NSArray<NSView *> *fieldButtons;
+@property (nonatomic, copy) NSString *shown;  // What the last restyle applied, so an unchanged one costs nothing.
 @property (nonatomic, strong) NSTextField *label;
 @property (nonatomic, strong) NSTrackingArea *tracking;
 @property (nonatomic, strong) NSTimer *lightsTimer;
