@@ -1,7 +1,7 @@
 #import "Look.h"
 
 NSView *DPArcHostOf(NSWindow *window, BOOL create);
-void DPArcInstallSpacing(void), DPArcApplySpacing(void), DPArcInstallSpaceLabel(void), DPArcApplySpaceLabel(void);
+void DPArcInstallSpacing(void), DPArcApplySpacing(void), DPArcInstallSpaceLabel(void), DPArcApplySpaceLabel(void), DPArcInstallControlCenter(void);
 
 static NSHashTable<NSWindow *> *DPPending;
 extern NSHashTable<NSView *> *DPArcPanes;
@@ -47,6 +47,7 @@ static void DPInstallArcSidebarHeader(void) {
     DPArcInstallSnapshot();
     DPArcInstallSpacing();
     DPArcInstallSpaceLabel();
+    DPArcInstallControlCenter();
 }
 
 static void DPApplyArcSidebarHeader(DPPatch *patch) {
@@ -82,7 +83,7 @@ DP_PATCH(DPArcSidebarHeader) {
     .key = @"arcSidebarHeader",
     .order = 46,
     .title = @"Address in Sidebar",
-    .detail = @"Move the address field and pinned extensions into the top of the sidebar, with the sidebar, back, forward and reload buttons beside the window buttons, like Arc. The profile switcher makes way: switch profiles with ⌘1–9 or the Profiles menu.",
+    .detail = @"Move the address field, pinned extensions and the sidebar, back, forward and reload buttons into the top of the sidebar, like Arc. The site button opens every extension and the site’s settings. Switch profiles with ⌘1–9 or the Profiles menu.",
     .symbol = @"sidebar.left",
     .tint = @"systemIndigoColor",
     .requires = @"hideToolbar",

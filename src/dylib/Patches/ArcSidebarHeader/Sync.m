@@ -78,7 +78,7 @@ static CGFloat DPExtensionsWidth(NSView *extensions, CGFloat *full) {
 }
 
 static void DPLayOut(DPArcState *state) {
-    NSView *host = state.host, *header = state.header, *root = header.superview, *capsule = DPArcCapsuleIn(host), *clip = DPArcClipIn(capsule);
+    NSView *host = state.host, *header = state.header, *root = header.superview, *capsule = DPArcCapsuleIn(host);
     NSDictionary<NSString *, NSView *> *parts = state.parts;
     CGFloat width = NSWidth(root.bounds);
     if (host.superview != root || root.subviews.lastObject != host) [root addSubview:host positioned:NSWindowAbove relativeTo:nil];
@@ -99,13 +99,14 @@ static void DPLayOut(DPArcState *state) {
     CGFloat shown = 0;
     if (extensions) {
         CGFloat full = 0, pitch = DPExtensionsWidth(extensions, &full), height = NSHeight(DPArcDiaFrame(extensions)) ?: 42;
-        // Two, as in Arc's capsule; the rest are a ⇧⌘X away.
-        shown = MIN(MIN(full, 2 * pitch), floor(MAX(0, NSWidth(pill) - 110) / pitch) * pitch);
-        clip.frame = NSMakeRect(NSWidth(pill) - shown - 4, 0, shown, NSHeight(pill));
+        // Two, as in Arc's capsule; all of them are in the site panel.
+        shown = MIN(MIN(full, 2 * pitch), floor(MAX(0, NSWidth(pill) - 134) / pitch) * pitch);
         DPArcPlace(extensions, NSMakeRect(0, round((NSHeight(pill) - height) / 2), full, height));
     }
+    state.extensionsShown = shown;
+    // The field spans the capsule, so Dia's buttons end at its right; the restyle puts the extensions just before them.
     CGFloat height = NSHeight(DPArcDiaFrame(address));
-    DPArcPlace(address, NSMakeRect(4, round((NSHeight(pill) - height) / 2), NSWidth(pill) - shown - 12, height));
+    DPArcPlace(address, NSMakeRect(4, round((NSHeight(pill) - height) / 2), NSWidth(pill) - 8, height));
     DPArcTrack(state);
     DPArcRestyle(state);
 }

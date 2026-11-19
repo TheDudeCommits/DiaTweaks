@@ -3,7 +3,6 @@
 static char DPStateKey, DPHidButtonKey;
 
 @implementation DPArcState
-- (void)dealloc { [_lightsTimer invalidate]; }
 @end
 
 DPArcState *DPArcStateOf(NSView *host) {
@@ -13,13 +12,6 @@ DPArcState *DPArcStateOf(NSView *host) {
 }
 
 NSView *DPArcLights(NSView *header) { return DPFindView(header, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaTrafficLights); }); }
-
-// AppKit and Dia show the window buttons again whenever the window becomes active: hold them where the pointer left them.
-static void DPHoldLights(DPArcState *state) {
-    NSView *lights = state.lights;
-    if (!lights || ![lights isDescendantOf:state.header]) state.lights = lights = DPArcLights(state.header);
-    if (lights && fabs(lights.alphaValue - state.lightsProgress) > 0.001 && !state.lightsTimer.valid) lights.alphaValue = state.lightsProgress;
-}
 
 // The window buttons' centre line, which the sidebar, back, forward and reload buttons share.
 CGFloat DPArcCentreLine(DPArcState *state) {
@@ -89,7 +81,6 @@ static void DPUnstyleArrow(NSView *control) {
 void DPArcRestyle(DPArcState *state) {
     NSView *capsule = state.parts[@"address"].superview, *address = state.parts[@"address"];
     if (!state.host || !address) return;
-    DPHoldLights(state);
     DPStyleArrow((NSControl *)state.parts[@"back"], @"arrow.left");
     DPStyleArrow((NSControl *)state.parts[@"forward"], @"arrow.right");
 
@@ -112,7 +103,11 @@ void DPArcRestyle(DPArcState *state) {
     NSView *scroller = text.enclosingScrollView ?: text;
     NSString *site = DPSiteOf(text.string ?: @"");
     BOOL editing = DPEditing(state), open = editing || state.overCapsule, plain = editing || !site.length;
-    NSString *shown = [NSString stringWithFormat:@"%d%d%d|%@|%@|%@", editing, open, plain, site, NSStringFromRect(capsule.bounds), NSStringFromRect(scroller.frame)];
+    // Arc's capsule reads site, extensions, then the link and site buttons: the extensions sit just before Dia's buttons.
+    CGFloat buttons = NSMaxX(address.frame);
+    for (NSView *button in state.fieldButtons)
+        if (!button.hidden) buttons = MIN(buttons, NSMinX([button convertRect:button.bounds toView:capsule]));
+    NSString *shown = [NSString stringWithFormat:@"%d%d%d|%@|%@|%@|%g|%g", editing, open, plain, site, NSStringFromRect(capsule.bounds), NSStringFromRect(scroller.frame), buttons, state.extensionsShown];
     if ([state.shown isEqual:shown] && state.label.superview == capsule) return;
     state.shown = shown;
     if (!state.label) {
@@ -126,20 +121,28 @@ void DPArcRestyle(DPArcState *state) {
     if (![state.label.stringValue isEqual:site]) state.label.stringValue = site;
     // At rest Arc shows the site alone; the bookmark, split and site buttons come in under the pointer.
     NSRect area = open && scroller ? [scroller convertRect:scroller.bounds toView:capsule] : [address convertRect:address.bounds toView:capsule];
-    // Arc's capsule offers copy link and site controls; bookmark and split stay out, as there, to leave the site room.
+    // Arc's capsule offers copy link and site controls; bookmark and split are in the site panel, as there, to leave the site room.
     for (NSView *button in state.fieldButtons) {
         BOOL arcHas = !DPHasLabel(button, @"Split tabs") && ![button.accessibilityLabel.lowercaseString containsString:@"bookmark"];
         // Only ever hide: the ones Dia hides itself (like Delete chat) stay its business.
         if (!arcHas && !button.hidden) button.hidden = YES, DPSet(button, &DPHidButtonKey, @YES);
         if (arcHas) DPFade(button, open ? 1 : 0);
     }
+    NSView *clip = DPArcClipIn(capsule);
+    CGFloat extensions = state.extensionsShown;
+    NSRect clipFrame = NSMakeRect(buttons - extensions - 2, 0, extensions, NSHeight(capsule.bounds));
+    if (!NSEqualRects(clip.frame, clipFrame)) clip.frame = clipFrame;
+    // Over the field, so the extensions take their own clicks; out of the way while typing.
+    if (capsule.subviews.lastObject != clip) [capsule addSubview:clip positioned:NSWindowAbove relativeTo:nil];
+    if (clip.hidden != editing) clip.hidden = editing;
+    CGFloat end = open ? MIN(NSMaxX(area), extensions > 0 ? NSMinX(clipFrame) - 4 : NSMaxX(area)) : NSWidth(capsule.bounds) - DPArcTextInset;
     CGFloat height = ceil(state.label.intrinsicContentSize.height);
-    NSRect frame = NSMakeRect(DPArcTextInset, round((NSHeight(capsule.bounds) - height) / 2), MAX(0, (open ? NSMaxX(area) : NSWidth(capsule.bounds) - DPArcTextInset) - DPArcTextInset), height);
+    NSRect frame = NSMakeRect(DPArcTextInset, round((NSHeight(capsule.bounds) - height) / 2), MAX(0, end - DPArcTextInset), height);
     if (!NSEqualRects(state.label.frame, frame)) state.label.frame = frame;
     // Typing, or a blank page, shows Dia's own field: its text, caret and prompt.
     if (scroller.alphaValue != (plain ? 1 : 0)) scroller.alphaValue = plain ? 1 : 0;
     if (state.label.hidden != plain) state.label.hidden = plain;
-    DPFade(DPArcClipIn(capsule), open ? 1 : 0);
+    DPFade(clip, open ? 1 : 0);
     if ([capsule respondsToSelector:@selector(setHovered:)]) [capsule setValue:@(state.overCapsule && !editing) forKey:@"hovered"];
 }
 
@@ -155,9 +158,9 @@ void DPArcUnstyle(DPArcState *state) {
     state.text = nil;
     state.fieldButtons = nil;
     state.shown = nil;
-    DPArcClipIn(state.parts[@"address"].superview).alphaValue = 1;
+    NSView *clip = DPArcClipIn(state.parts[@"address"].superview);
+    clip.alphaValue = 1;
+    clip.hidden = NO;
     [state.label removeFromSuperview];
-    [state.lightsTimer invalidate];
-    state.lightsProgress = 1;
-    DPArcLights(state.header).alphaValue = 1;
+    DPArcCloseControlCenter();
 }
