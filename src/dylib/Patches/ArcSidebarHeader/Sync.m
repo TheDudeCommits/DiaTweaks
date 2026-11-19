@@ -99,8 +99,8 @@ static void DPLayOut(DPArcState *state) {
     CGFloat shown = 0;
     if (extensions) {
         CGFloat full = 0, pitch = DPExtensionsWidth(extensions, &full), height = NSHeight(DPArcDiaFrame(extensions)) ?: 42;
-        // Whole icons only, leaving the address at least 100 points.
-        shown = MIN(full, floor(MAX(0, NSWidth(pill) - 110) / pitch) * pitch);
+        // Two, as in Arc's capsule; the rest are a ⇧⌘X away.
+        shown = MIN(MIN(full, 2 * pitch), floor(MAX(0, NSWidth(pill) - 110) / pitch) * pitch);
         clip.frame = NSMakeRect(NSWidth(pill) - shown - 4, 0, shown, NSHeight(pill));
         DPArcPlace(extensions, NSMakeRect(0, round((NSHeight(pill) - height) / 2), full, height));
     }

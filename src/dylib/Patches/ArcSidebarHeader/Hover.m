@@ -63,3 +63,12 @@ void DPArcTrack(DPArcState *state) {
                                                     owner:tracker userInfo:nil];
     [host addTrackingArea:state.tracking];
 }
+
+// Developer tools only: show the hover look without a pointer ("capsule", "buttons" or "none").
+void DPArcFakeHover(DPArcState *state, NSString *what) {
+    BOOL buttons = [what isEqual:@"buttons"], capsule = [what isEqual:@"capsule"];
+    if (buttons != state.overButtons) DPShowLights(state, buttons);
+    state.overButtons = buttons;
+    state.overCapsule = capsule;
+    DPArcRestyle(state);
+}

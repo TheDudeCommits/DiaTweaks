@@ -1,6 +1,6 @@
 #import "Look.h"
 
-static char DPStateKey;
+static char DPStateKey, DPHidButtonKey;
 
 @implementation DPArcState
 - (void)dealloc { [_lightsTimer invalidate]; }
@@ -13,6 +13,13 @@ DPArcState *DPArcStateOf(NSView *host) {
 }
 
 NSView *DPArcLights(NSView *header) { return DPFindView(header, ^BOOL(NSView *v) { return DPIsKind(v, DPDiaTrafficLights); }); }
+
+// AppKit and Dia show the window buttons again whenever the window becomes active: hold them where the pointer left them.
+static void DPHoldLights(DPArcState *state) {
+    NSView *lights = state.lights;
+    if (!lights || ![lights isDescendantOf:state.header]) state.lights = lights = DPArcLights(state.header);
+    if (lights && fabs(lights.alphaValue - state.lightsProgress) > 0.001 && !state.lightsTimer.valid) lights.alphaValue = state.lightsProgress;
+}
 
 // The window buttons' centre line, which the sidebar, back, forward and reload buttons share.
 CGFloat DPArcCentreLine(DPArcState *state) {
@@ -66,7 +73,8 @@ static void DPStyleArrow(NSControl *control, NSString *symbol) {
         arrow.image = [[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] imageWithSymbolConfiguration:config];
         [control addSubview:arrow];
     }
-    for (NSView *sub in control.subviews) if (sub != arrow && sub.alphaValue != 0) sub.alphaValue = 0;
+    // Hidden, not faded: Dia fades its chevron back in whenever the button is enabled, which drew both.
+    for (NSView *sub in control.subviews) if (sub != arrow && !sub.hidden) sub.hidden = YES;
     NSColor *tint = control.isEnabled ? NSColor.secondaryLabelColor : NSColor.tertiaryLabelColor;
     if (arrow.contentTintColor != tint) arrow.contentTintColor = tint;
 }
@@ -74,13 +82,14 @@ static void DPStyleArrow(NSControl *control, NSString *symbol) {
 static void DPUnstyleArrow(NSView *control) {
     for (NSView *sub in [control.subviews copy]) {
         if ([sub.identifier isEqual:@"DPArcArrow"]) [sub removeFromSuperview];
-        else sub.alphaValue = 1;
+        else sub.hidden = NO;
     }
 }
 
 void DPArcRestyle(DPArcState *state) {
     NSView *capsule = state.parts[@"address"].superview, *address = state.parts[@"address"];
     if (!state.host || !address) return;
+    DPHoldLights(state);
     DPStyleArrow((NSControl *)state.parts[@"back"], @"arrow.left");
     DPStyleArrow((NSControl *)state.parts[@"forward"], @"arrow.right");
 
@@ -117,7 +126,13 @@ void DPArcRestyle(DPArcState *state) {
     if (![state.label.stringValue isEqual:site]) state.label.stringValue = site;
     // At rest Arc shows the site alone; the bookmark, split and site buttons come in under the pointer.
     NSRect area = open && scroller ? [scroller convertRect:scroller.bounds toView:capsule] : [address convertRect:address.bounds toView:capsule];
-    for (NSView *button in state.fieldButtons) DPFade(button, open ? 1 : 0);
+    // Arc's capsule offers copy link and site controls; bookmark and split stay out, as there, to leave the site room.
+    for (NSView *button in state.fieldButtons) {
+        BOOL arcHas = !DPHasLabel(button, @"Split tabs") && ![button.accessibilityLabel.lowercaseString containsString:@"bookmark"];
+        // Only ever hide: the ones Dia hides itself (like Delete chat) stay its business.
+        if (!arcHas && !button.hidden) button.hidden = YES, DPSet(button, &DPHidButtonKey, @YES);
+        if (arcHas) DPFade(button, open ? 1 : 0);
+    }
     CGFloat height = ceil(state.label.intrinsicContentSize.height);
     NSRect frame = NSMakeRect(DPArcTextInset, round((NSHeight(capsule.bounds) - height) / 2), MAX(0, (open ? NSMaxX(area) : NSWidth(capsule.bounds) - DPArcTextInset) - DPArcTextInset), height);
     if (!NSEqualRects(state.label.frame, frame)) state.label.frame = frame;
@@ -133,7 +148,10 @@ void DPArcUnstyle(DPArcState *state) {
     DPUnstyleArrow(state.parts[@"forward"]);
     NSTextView *text = DPAddressText(state.parts[@"address"]);
     (text.enclosingScrollView ?: text).alphaValue = 1;
-    for (NSView *button in state.fieldButtons) button.alphaValue = 1;
+    for (NSView *button in state.fieldButtons) {
+        button.alphaValue = 1;
+        if (DPGet(button, &DPHidButtonKey)) button.hidden = NO, DPSet(button, &DPHidButtonKey, nil);
+    }
     state.text = nil;
     state.fieldButtons = nil;
     state.shown = nil;

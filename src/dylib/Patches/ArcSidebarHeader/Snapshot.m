@@ -44,10 +44,24 @@ static void DPRunMenuItem(NSString *title) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ DPArcLogState(title); });
 }
 
+@class DPArcState;
+NSView *DPArcHostOf(NSWindow *window, BOOL create);
+id DPArcStateOf(NSView *host);
+void DPArcFakeHover(id state, NSString *what);
+
+static void DPFakeHover(NSString *what) {
+    for (NSWindow *window in NSApp.windows) {
+        NSView *host = DPArcHostOf(window, NO);
+        if (host.superview && window.isVisible) DPArcFakeHover(DPArcStateOf(host), what);
+    }
+}
+
 void DPArcInstallSnapshot(void) {
     if (![[[NSUserDefaults alloc] initWithSuiteName:@"com.diapatches"] boolForKey:@"devTools"]) return;
     [NSDistributedNotificationCenter.defaultCenter addObserverForName:@"com.diapatches.dev.sidebarSnapshot" object:nil queue:NSOperationQueue.mainQueue
                                                            usingBlock:^(NSNotification *_) { DPWriteSnapshots(); }];
     [NSDistributedNotificationCenter.defaultCenter addObserverForName:@"com.diapatches.dev.arcMenu" object:nil queue:NSOperationQueue.mainQueue
                                                            usingBlock:^(NSNotification *note) { DPRunMenuItem(note.object); }];
+    [NSDistributedNotificationCenter.defaultCenter addObserverForName:@"com.diapatches.dev.arcHover" object:nil queue:NSOperationQueue.mainQueue
+                                                           usingBlock:^(NSNotification *note) { DPFakeHover(note.object); }];
 }
