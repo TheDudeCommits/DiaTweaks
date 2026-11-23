@@ -31,13 +31,13 @@ static NSArray<NSView *> *DPTiles(NSView *dock) {
     return tiles;
 }
 
-// The dock's height for Arc's grid: square tiles, the same number across as Dia chose.
-static CGFloat DPArcDockHeight(NSView *dock, NSUInteger *columns, CGFloat *side) {
+// The dock's height for Arc's grid, at this width: square tiles, the same number across as Dia chose.
+static CGFloat DPArcDockHeight(NSView *dock, CGFloat width, NSUInteger *columns, CGFloat *side) {
     NSArray<NSView *> *tiles = DPTiles(dock);
     NSMutableSet *xs = [NSMutableSet new];
     for (NSView *tile in tiles) [xs addObject:@(round(NSMinX(tile.frame)))];
     *columns = MAX(1, xs.count);
-    *side = floor((NSWidth(dock.bounds) - 2 * DPArcTileMargin - DPArcTileGap * (*columns - 1)) / *columns * 2) / 2;
+    *side = floor((width - 2 * DPArcTileMargin - DPArcTileGap * (*columns - 1)) / *columns * 2) / 2;
     NSUInteger rows = (tiles.count + *columns - 1) / *columns;
     return rows ? rows * *side + (rows - 1) * DPArcTileGap : 0;
 }
@@ -47,7 +47,7 @@ static void DPDock_layout(NSView *self, SEL _cmd) {
     if (!DPArcSpacing(self)) return;
     NSUInteger columns;
     CGFloat side;
-    DPArcDockHeight(self, &columns, &side);
+    DPArcDockHeight(self, NSWidth(self.bounds), &columns, &side);
     NSArray<NSView *> *tiles = [DPTiles(self) sortedArrayUsingComparator:^NSComparisonResult(NSView *a, NSView *b) {
         if (fabs(NSMinY(a.frame) - NSMinY(b.frame)) > 0.5) return [@(NSMinY(a.frame)) compare:@(NSMinY(b.frame))];
         return [@(NSMinX(a.frame)) compare:@(NSMinX(b.frame))];
@@ -61,21 +61,69 @@ static void DPDock_layout(NSView *self, SEL _cmd) {
     }];
 }
 
-// The tab list under the dock moves down by however much taller Arc's grid is.
+// The tab list under the dock moves down by however much taller Arc's grid is. Every frame is worked out
+// from the one Dia last gave that view, which its setter records: Dia often moves the list under the dock
+// without touching the dock (the sidebar opening over the page, a resize), and a one-off nudge measured
+// from the dock's current height then left the list where Dia put it, under the taller grid.
+static char DPDiaFrameKey, DPPlacedKey;
+static BOOL DPPlacingList;
+
+static NSView *DPDockIn(NSView *list) {
+    for (NSView *sub in list.subviews) if (DPIsKind(sub, DPDiaTabDock)) return sub;
+    return nil;
+}
+
+static NSRect DPDiaFrame(NSView *view) {
+    NSValue *dia = DPGet(view, &DPDiaFrameKey), *placed = DPGet(view, &DPPlacedKey);
+    // Moved some way other than setFrame: since (its origin or size alone): that's Dia's frame now.
+    if (!dia || (placed && !NSEqualRects(view.frame, placed.rectValue) && !NSEqualRects(view.frame, dia.rectValue))) return view.frame;
+    return dia.rectValue;
+}
+
+// Where Arc's spacing puts this child of the tab list, given the frame Dia wants for it.
+static NSRect DPArcPlaced(NSView *list, NSView *view, NSRect frame) {
+    NSView *dock = DPDockIn(list);
+    if (!dock || !list.isFlipped || !DPArcSpacing(list)) return frame;
+    NSRect diaDock = view == dock ? frame : DPDiaFrame(dock);
+    NSUInteger columns;
+    CGFloat side, height = DPArcDockHeight(dock, NSWidth(diaDock), &columns, &side);
+    if (!height) return frame;  // (no tiles: Dia's dock as it is)
+    if (view == dock) {
+        frame.size.height = height;
+        return frame;
+    }
+    CGFloat grow = height - NSHeight(diaDock);
+    if (NSMinY(frame) < NSMaxY(diaDock) - 0.5) return frame;
+    frame.origin.y += grow;
+    frame.size.height = MAX(0, NSHeight(frame) - grow);
+    return frame;
+}
+
+static void DPListChild_setFrame(NSView *self, SEL _cmd, NSRect frame) {
+    NSView *list = self.superview;
+    if (DPPlacingList || !DPIsKind(list, DPDiaTabList)) return DPCallOriginal(DPListChild_setFrame, self, frame);
+    DPSet(self, &DPDiaFrameKey, @(frame));
+    frame = DPArcPlaced(list, self, frame);
+    DPSet(self, &DPPlacedKey, @(frame));
+    DPCallOriginal(DPListChild_setFrame, self, frame);
+}
+
+static void DPPlaceList(NSView *list) {
+    for (NSView *sub in list.subviews) {
+        DPHookClass(sub.class, @selector(setFrame:), (IMP)DPListChild_setFrame);
+        NSRect dia = DPDiaFrame(sub), frame = DPArcPlaced(list, sub, dia);
+        DPSet(sub, &DPDiaFrameKey, @(dia));
+        DPSet(sub, &DPPlacedKey, @(frame));
+        if (NSEqualRects(sub.frame, frame) || !DPMayAdjust(sub)) continue;
+        DPPlacingList = YES;
+        sub.frame = frame;
+        DPPlacingList = NO;
+    }
+}
+
 static void DPTabList_layout(NSView *self, SEL _cmd) {
     DPCallOriginal(DPTabList_layout, self);
-    NSView *dock = nil;
-    for (NSView *sub in self.subviews) if (DPIsKind(sub, DPDiaTabDock)) dock = sub;
-    if (!dock || !DPArcSpacing(self) || !self.isFlipped) return;
-    NSUInteger columns;
-    CGFloat side, height = DPArcDockHeight(dock, &columns, &side), grow = height - NSHeight(dock.frame);
-    if (fabs(grow) < 0.5 || !DPMayAdjust(dock)) return;
-    CGFloat below = NSMaxY(dock.frame);
-    dock.frame = NSMakeRect(NSMinX(dock.frame), NSMinY(dock.frame), NSWidth(dock.frame), height);
-    for (NSView *sub in self.subviews) {
-        if (sub == dock || NSMinY(sub.frame) < below - 0.5 || !DPMayAdjust(sub)) continue;
-        sub.frame = NSMakeRect(NSMinX(sub.frame), NSMinY(sub.frame) + grow, NSWidth(sub.frame), MAX(0, NSHeight(sub.frame) - grow));
-    }
+    if (DPDockIn(self)) DPPlaceList(self);
 }
 
 void DPArcInstallSpacing(void) {
