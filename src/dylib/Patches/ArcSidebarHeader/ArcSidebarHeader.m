@@ -1,7 +1,7 @@
 #import "Look.h"
 
 NSView *DPArcHostOf(NSWindow *window, BOOL create);
-void DPArcInstallSpacing(void), DPArcApplySpacing(void), DPArcInstallSpaceLabel(void), DPArcApplySpaceLabel(void), DPArcInstallControlCenter(void);
+void DPArcInstallSpacing(void), DPArcApplySpacing(void), DPArcInstallSpaceLabel(void), DPArcApplySpaceLabel(void), DPArcInstallControlCenter(void), DPArcInstallPermission(void);
 
 static NSHashTable<NSWindow *> *DPPending;
 extern NSHashTable<NSView *> *DPArcPanes;
@@ -48,6 +48,7 @@ static void DPInstallArcSidebarHeader(void) {
     DPArcInstallSpacing();
     DPArcInstallSpaceLabel();
     DPArcInstallControlCenter();
+    DPArcInstallPermission();
 }
 
 static void DPApplyArcSidebarHeader(DPPatch *patch) {
